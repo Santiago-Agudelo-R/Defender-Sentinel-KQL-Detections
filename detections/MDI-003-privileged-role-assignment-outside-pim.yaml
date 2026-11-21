@@ -1,0 +1,65 @@
+id: MDI-003
+title: Permanent High-Privilege Entra ID Role Assignment Outside PIM
+basis: Field experience
+platform: Microsoft Sentinel
+severity: High
+status: Production
+queryFrequency: PT1H
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - Persistence
+  - PrivilegeEscalation
+techniques:
+  - T1098.003
+relevantTables:
+  - AuditLogs
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: Name
+        columnName: InitiatedByUpn
+  - entityType: Account
+    fieldMappings:
+      - identifier: Name
+        columnName: TargetUpn
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: InitiatedByIP
+description: Identifies permanent directory role assignments (Add member to role) for Tier-0 Entra ID roles (Global Administrator, Privileged Role Administrator, Security Administrator, Intune Administrator, Exchange Administrator) executed outside Privileged Identity Management (PIM) Just-In-Time workflows.
+query: |
+  let Tier0Roles = dynamic([
+      "Global Administrator",
+      "Company Administrator",
+      "Privileged Role Administrator",
+      "Security Administrator",
+      "Intune Administrator",
+      "Exchange Administrator",
+      "Conditional Access Administrator"
+  ]);
+  AuditLogs
+  | where TimeGenerated > ago(1h)
+  | where OperationName == "Add member to role"
+  | where Result == "success"
+  | extend InitiatedByApp = tostring(InitiatedBy.app.displayName)
+  | where InitiatedByApp != "MS-PIM"
+  | extend InitiatedByUpn = tostring(InitiatedBy.user.userPrincipalName)
+  | extend InitiatedByIP = tostring(InitiatedBy.user.ipAddress)
+  | extend TargetUpn = tostring(TargetResources[0].userPrincipalName)
+  | extend ModifiedProps = TargetResources[0].modifiedProperties
+  | mv-expand Prop = ModifiedProps
+  | where tostring(Prop.displayName) == "Role.DisplayName"
+  | extend AssignedRole = trim('"', tostring(Prop.newValue))
+  | where AssignedRole in~ (Tier0Roles)
+  | project
+      TimeGenerated,
+      OperationName,
+      AssignedRole,
+      TargetUpn,
+      InitiatedByUpn,
+      InitiatedByApp,
+      InitiatedByIP,
+      CorrelationId
+  | order by TimeGenerated desc

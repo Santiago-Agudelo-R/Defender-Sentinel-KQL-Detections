@@ -1,0 +1,41 @@
+id: MDVM-004
+title: High-Exposure Endpoints with Unpatched Critical or Active-Exploit Vulnerabilities
+basis: Field experience
+platform: Microsoft Defender XDR
+severity: Medium
+status: Production
+queryFrequency: P1D
+queryPeriod: P1D
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - InitialAccess
+  - PrivilegeEscalation
+techniques:
+  - T1190
+  - T1068
+relevantTables:
+  - DeviceTvmSoftwareVulnerabilities
+  - DeviceInfo
+entityMappings:
+  - entityType: Host
+    fieldMappings:
+      - identifier: HostName
+        columnName: DeviceName
+description: Correlates Microsoft Defender Vulnerability Management findings (DeviceTvmSoftwareVulnerabilities) with the latest endpoint posture state (DeviceInfo) to surface High Exposure devices carrying Critical severity CVEs that require security updates.
+query: |
+  let HighExposureDevices = DeviceInfo
+      | where Timestamp > ago(1d)
+      | summarize arg_max(Timestamp, *) by DeviceId
+      | where ExposureLevel == "High" and OnboardingStatus == "Onboarded"
+      | project DeviceId, DeviceName, OSPlatform, OSVersion, ExposureLevel, MachineGroup;
+  DeviceTvmSoftwareVulnerabilities
+  | where VulnerabilitySeverityLevel == "Critical"
+  | where isnotempty(RecommendedSecurityUpdate)
+  | join kind=inner HighExposureDevices on DeviceId
+  | summarize
+      CriticalCveCount = dcount(CveId),
+      SampleCves = make_set(CveId, 10),
+      RecommendedUpdates = make_set(RecommendedSecurityUpdate, 5)
+      by DeviceId, DeviceName, OSPlatform, OSVersion, ExposureLevel, MachineGroup
+  | order by CriticalCveCount desc, DeviceName asc
