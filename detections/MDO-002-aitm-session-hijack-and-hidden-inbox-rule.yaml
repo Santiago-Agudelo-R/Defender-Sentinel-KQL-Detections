@@ -5,7 +5,7 @@ platform: Microsoft Defender XDR
 severity: High
 status: Lab-Validated
 queryFrequency: PT1H
-queryPeriod: PT1D
+queryPeriod: P1D
 triggerOperator: gt
 triggerThreshold: 0
 tactics:
