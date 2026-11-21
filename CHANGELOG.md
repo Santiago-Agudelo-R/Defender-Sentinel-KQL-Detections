@@ -2,6 +2,12 @@
 
 All notable changes to **Defender-Sentinel-KQL-Detections** are documented in this file.
 
+## [1.0.1] - 2026-11-21
+
+### Added
+- **Sentinel Entity Type Validation (src/validate_detections.py):** Added strict validation against official Microsoft Sentinel entityType identifiers (Account, Host, IP, Process, AzureResource, File, FileHash, Mailbox, CloudApplication) and corresponding unit test coverage in 	ests/test_detections.py.
+- Added explicit author and license headers across validator and test modules.
+
 ## [1.0.0] - 2026-11-21
 
 ### Added

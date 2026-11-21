@@ -8,7 +8,10 @@ Validates:
 - MITRE ATT&CK tactic names and technique ID format (Txxxx or Txxxx.xxx)
 - ISO-8601 duration strings for queryFrequency and queryPeriod
 - Table reference consistency between relevantTables and the KQL query body
-- Entity mapping column presence in the KQL query body
+- Entity mapping column presence and valid Sentinel entityType names in the KQL query body
+
+Author: Santiago Agudelo
+License: MIT
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ REQUIRED_FIELDS = {
 VALID_SEVERITIES = {"Informational", "Low", "Medium", "High"}
 VALID_BASIS = {"Field experience", "SC-200 lab"}
 VALID_OPERATORS = {"gt", "lt", "eq", "ne"}
+VALID_ENTITY_TYPES = {"Account", "Host", "IP", "Process", "AzureResource", "File", "FileHash", "Mailbox", "CloudApplication"}
 VALID_MITRE_TACTICS = {
     "Reconnaissance",
     "ResourceDevelopment",
@@ -249,6 +253,11 @@ def validate_detection(rule: Dict[str, Any], source_name: str = "<memory>") -> L
         errors.append(f"{source_name}: entityMappings must be a non-empty list")
     else:
         for em in mappings:
+            etype = str(em.get("entityType", "")).strip()
+            if etype not in VALID_ENTITY_TYPES:
+                errors.append(
+                    f"{source_name}: Unsupported Sentinel entityType '{etype}'. Expected one of {sorted(VALID_ENTITY_TYPES)}"
+                )
             for fm in em.get("fieldMappings", []):
                 col = str(fm.get("columnName", "")).strip()
                 if not col or not re.search(rf"\b{re.escape(col)}\b", query_text):

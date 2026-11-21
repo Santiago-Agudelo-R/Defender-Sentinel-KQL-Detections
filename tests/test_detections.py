@@ -1,3 +1,4 @@
+# Author: Santiago Agudelo | License: MIT
 from __future__ import annotations
 
 import copy
@@ -79,3 +80,18 @@ def test_validator_catches_query_frequency_greater_than_period() -> None:
 
     errs = validate_detection(bad_rule, "bad_window.yaml")
     assert any("cannot exceed queryPeriod" in e for e in errs)
+
+def test_validator_catches_unsupported_sentinel_entity_type() -> None:
+    rules = [
+        load_detection_yaml(p)
+        for p in sorted((REPO_ROOT / "detections").glob("*.yaml"))
+    ]
+    sample = dict(rules[0])
+    sample["entityMappings"] = [
+        {
+            "entityType": "InvalidEntityType",
+            "fieldMappings": [{"identifier": "HostName", "columnName": "DeviceName"}],
+        }
+    ]
+    errors = validate_detection(sample, source_name="bad_entity_type.yaml")
+    assert any("Unsupported Sentinel entityType" in e for e in errors)
