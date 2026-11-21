@@ -47,7 +47,9 @@ query: |
       | where Text matches regex @'(?i)-(Disable(RealtimeMon|BehaviorMon|IOAV|ScriptScan|IntrusionPrev|ArchiveScan|BlockAtFirstSeen)[a-z]*|drtm|dbm|dioavp|dscrptsc)\b'
           or Text matches regex @'(?i)\b(stop|delete|config)\s+(WinDefend|Sense|WdFilter|WdNisSvc)\b'
           or (Text has_any ('Add-MpPreference', 'Set-MpPreference') and Text matches regex @'(?i)-Exclusion(Path|Process|Extension|IpAddress)\b')
-          or Text matches regex @'(?i)Windows Defender\\(Exclusions|Real-Time Protection)'
+          // Registry tampering only counts for writes, not for 'reg query' or Get-ItemProperty reads.
+          or (Text matches regex @'(?i)Windows Defender\\(Exclusions|Real-Time Protection)'
+              and Text matches regex @'(?i)\b(reg(\.exe)?\s+(add|delete|import)|Set-ItemProperty|New-ItemProperty|Remove-ItemProperty)\b')
           or Text matches regex @'(?i)DisableAntiSpyware|-RemoveDefinitions'
       | project
           Timestamp,

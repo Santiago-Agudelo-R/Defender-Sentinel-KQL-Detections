@@ -2,6 +2,12 @@
 
 All notable changes to **Defender-Sentinel-KQL-Detections** are documented in this file.
 
+## [1.2.1] - 2026-11-21
+
+### Fixed
+- **SENTINEL-005:** `createdump.exe` alone no longer triggers the rule; .NET uses it for ordinary crash dumps. It now counts only when the command line names `lsass`.
+- **MDE-001:** Defender registry paths (`Exclusions`, `Real-Time Protection`) only match when combined with a write (`reg add/delete/import`, `Set-/New-/Remove-ItemProperty`), so `reg query` and other reads no longer fire.
+
 ## [1.2.0] - 2026-11-21
 
 ### Added
