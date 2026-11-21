@@ -1,11 +1,11 @@
 id: MDO-002
 title: Post-Sign-In Suspicious Exchange Online Inbox Rule or Forwarding Modification
 basis: SC-200 lab
-platform: Microsoft Defender XDR / Microsoft Sentinel
+platform: Microsoft Defender XDR
 severity: High
 status: Lab-Validated
 queryFrequency: PT1H
-queryPeriod: PT2H
+queryPeriod: PT1D
 triggerOperator: gt
 triggerThreshold: 0
 tactics:
@@ -27,9 +27,9 @@ entityMappings:
     fieldMappings:
       - identifier: Address
         columnName: RuleClientIP
-description: Correlates Exchange Online mailbox manipulation events (New-InboxRule, Set-InboxRule, UpdateInboxRules, Set-Mailbox forwarding) in CloudAppEvents against recent interactive Entra ID sign-ins in AADSignInEventsBeta to detect post-compromise BEC and AiTM session persistence.
+description: Correlates Exchange Online mailbox persistence events (New-InboxRule, Set-InboxRule, UpdateInboxRules, Set-Mailbox forwarding) in CloudAppEvents against interactive and non-interactive Entra ID sign-ins in AADSignInEventsBeta, flagging cases where the inbox rule is created from a different IP than the initial sign-in (AiTM session cookie replay) or during a risky session.
 query: |
-  let lookback = 2h;
+  let lookback = 1d;
   let MailboxRuleChanges = CloudAppEvents
       | where Timestamp > ago(lookback)
       | where Application == "Microsoft Exchange Online"
@@ -43,7 +43,7 @@ query: |
           ActionType,
           RuleClientIP = IPAddress,
           RawParams;
-  let RecentSignIns = AADSignInEventsBeta
+  let SignInActivity = AADSignInEventsBeta
       | where Timestamp > ago(lookback)
       | where ErrorCode == 0
       | project
@@ -52,11 +52,13 @@ query: |
           AccountUpn,
           SignInIP = IPAddress,
           Country,
+          LogonType,
           RiskLevelDuringSignIn,
           SessionId;
   MailboxRuleChanges
-  | join kind=inner RecentSignIns on AccountObjectId
-  | where RuleEventTime between (SignInTime .. (SignInTime + 60m))
+  | join kind=inner SignInActivity on AccountObjectId
+  | where RuleEventTime between (SignInTime .. (SignInTime + 12h))
+  | where RuleClientIP != SignInIP or RiskLevelDuringSignIn in ("medium", "high", "50", "100") or tostring(LogonType) has "nonInteractive"
   | project
       RuleEventTime,
       SignInTime,
@@ -65,7 +67,9 @@ query: |
       ActionType,
       RuleClientIP,
       SignInIP,
+      IPMismatch = (RuleClientIP != SignInIP),
       Country,
+      LogonType,
       RiskLevelDuringSignIn,
       SessionId,
       RawParams

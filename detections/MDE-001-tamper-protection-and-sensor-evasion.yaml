@@ -3,7 +3,7 @@ title: Microsoft Defender Sensor Tampering and Realtime Monitoring Disablement
 basis: Field experience
 platform: Microsoft Defender XDR
 severity: High
-status: Production
+status: Hunting / Lab-Validated
 queryFrequency: PT1H
 queryPeriod: PT1H
 triggerOperator: gt
@@ -14,6 +14,7 @@ techniques:
   - T1562.001
 relevantTables:
   - DeviceProcessEvents
+  - DeviceEvents
 entityMappings:
   - entityType: Host
     fieldMappings:
@@ -27,32 +28,56 @@ entityMappings:
     fieldMappings:
       - identifier: CommandLine
         columnName: ProcessCommandLine
-description: Detects command-line attempts to stop the Microsoft Defender Antivirus or EDR sensor services (WinDefend, Sense), disable Real-Time Monitoring via PowerShell Set-MpPreference, or add broad path exclusions in DeviceProcessEvents.
+description: Detects attempts to tamper with Microsoft Defender Antivirus or EDR sensor services (WinDefend, Sense) across both DeviceProcessEvents (covering abbreviated Set-MpPreference parameter prefixes and encoded PowerShell invocations) and DeviceEvents (TamperingAttempt telemetry).
 query: |
-  DeviceProcessEvents
-  | where Timestamp > ago(1h)
-  | where FileName in~ ("powershell.exe", "pwsh.exe", "cmd.exe", "sc.exe", "net.exe", "reg.exe", "MpCmdRun.exe")
-  | where ProcessCommandLine has_any (
-      "DisableRealtimeMonitoring",
-      "DisableBehaviorMonitoring",
-      "DisableIOAVProtection",
-      "DisableScriptScanning",
-      "Add-MpPreference -ExclusionPath",
-      "stop WinDefend",
-      "stop Sense",
-      "config WinDefend start= disabled",
-      "DisableAntiSpyware"
-  )
-  | where not(InitiatingProcessAccountName in~ ("system", "local service") and InitiatingProcessFileName =~ "MsMpEng.exe")
-  | project
-      Timestamp,
-      DeviceId,
-      DeviceName,
-      InitiatingProcessAccountDomain,
-      InitiatingProcessAccountName,
-      InitiatingProcessFileName,
-      FileName,
-      ProcessCommandLine,
-      SHA256,
-      ReportId
+  let ProcessTampering = DeviceProcessEvents
+      | where Timestamp > ago(1h)
+      | where FileName in~ ("powershell.exe", "pwsh.exe", "cmd.exe", "sc.exe", "net.exe", "net1.exe", "reg.exe", "MpCmdRun.exe")
+      | where ProcessCommandLine has_any (
+          "DisableRealtimeMon",
+          "DisableBehaviorMon",
+          "DisableIOAV",
+          "DisableScriptScan",
+          "DisableIntrusionPrevention",
+          "ExclusionPath",
+          "ExclusionProcess",
+          "ExclusionExtension",
+          "stop WinDefend",
+          "stop Sense",
+          "config WinDefend",
+          "DisableAntiSpyware",
+          "-RemoveDefinitions"
+      )
+      or (FileName in~ ("powershell.exe", "pwsh.exe") and ProcessCommandLine matches regex @"(?i)\s-(e|en|enc|enco|encodedcommand)\s+[A-Za-z0-9+/=]{20,}")
+      | where not(InitiatingProcessAccountName in~ ("system", "local service") and InitiatingProcessFileName =~ "MsMpEng.exe")
+      | project
+          Timestamp,
+          DeviceId,
+          DeviceName,
+          ActionSource = "DeviceProcessEvents",
+          ActionType,
+          InitiatingProcessAccountDomain,
+          InitiatingProcessAccountName,
+          InitiatingProcessFileName,
+          FileName,
+          ProcessCommandLine,
+          SHA256,
+          ReportId;
+  let EventTampering = DeviceEvents
+      | where Timestamp > ago(1h)
+      | where ActionType in ("TamperingAttempt", "AntivirusTampering")
+      | project
+          Timestamp,
+          DeviceId,
+          DeviceName,
+          ActionSource = "DeviceEvents",
+          ActionType,
+          InitiatingProcessAccountDomain,
+          InitiatingProcessAccountName,
+          InitiatingProcessFileName,
+          FileName = InitiatingProcessFileName,
+          ProcessCommandLine = InitiatingProcessCommandLine,
+          SHA256 = InitiatingProcessSHA256,
+          ReportId;
+  union ProcessTampering, EventTampering
   | order by Timestamp desc

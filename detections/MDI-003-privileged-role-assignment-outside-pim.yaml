@@ -1,9 +1,9 @@
 id: MDI-003
-title: Permanent High-Privilege Entra ID Role Assignment Outside PIM
+title: Permanent High-Privilege Entra ID Role Assignment (Direct or Permanent PIM)
 basis: Field experience
 platform: Microsoft Sentinel
 severity: High
-status: Production
+status: Hunting / Lab-Validated
 queryFrequency: PT1H
 queryPeriod: PT1H
 triggerOperator: gt
@@ -18,17 +18,17 @@ relevantTables:
 entityMappings:
   - entityType: Account
     fieldMappings:
-      - identifier: Name
+      - identifier: FullName
         columnName: InitiatedByUpn
   - entityType: Account
     fieldMappings:
-      - identifier: Name
+      - identifier: FullName
         columnName: TargetUpn
   - entityType: IP
     fieldMappings:
       - identifier: Address
         columnName: InitiatedByIP
-description: Identifies permanent directory role assignments (Add member to role) for Tier-0 Entra ID roles (Global Administrator, Privileged Role Administrator, Security Administrator, Intune Administrator, Exchange Administrator) executed outside Privileged Identity Management (PIM) Just-In-Time workflows.
+description: Identifies active permanent directory role assignments for Tier-0 Entra ID roles across both direct assignments (Add member to role) and permanent PIM assignments (Add member to role outside of PIM (permanent), Add member to role in PIM completed (permanent)), while excluding time-bound PIM activations.
 query: |
   let Tier0Roles = dynamic([
       "Global Administrator",
@@ -39,18 +39,26 @@ query: |
       "Exchange Administrator",
       "Conditional Access Administrator"
   ]);
+  let PermanentRoleOps = dynamic([
+      "Add member to role",
+      "Add member to role outside of PIM (permanent)",
+      "Add member to role in PIM completed (permanent)"
+  ]);
   AuditLogs
   | where TimeGenerated > ago(1h)
-  | where OperationName == "Add member to role"
+  | where OperationName in~ (PermanentRoleOps)
   | where Result == "success"
   | extend InitiatedByApp = tostring(InitiatedBy.app.displayName)
-  | where InitiatedByApp != "MS-PIM"
+  | where not(OperationName =~ "Add member to role" and InitiatedByApp == "MS-PIM")
   | extend InitiatedByUpn = tostring(InitiatedBy.user.userPrincipalName)
   | extend InitiatedByIP = tostring(InitiatedBy.user.ipAddress)
-  | extend TargetUpn = tostring(TargetResources[0].userPrincipalName)
-  | extend ModifiedProps = TargetResources[0].modifiedProperties
-  | mv-expand Prop = ModifiedProps
-  | where tostring(Prop.displayName) == "Role.DisplayName"
+  | extend TargetUpn = coalesce(
+      tostring(TargetResources[0].userPrincipalName),
+      tostring(TargetResources[2].userPrincipalName)
+  )
+  | mv-expand TargetRes = TargetResources
+  | mv-expand Prop = TargetRes.modifiedProperties
+  | where tostring(Prop.displayName) in~ ("Role.DisplayName", "RoleDefinitionOriginId", "DisplayName")
   | extend AssignedRole = trim('"', tostring(Prop.newValue))
   | where AssignedRole in~ (Tier0Roles)
   | project

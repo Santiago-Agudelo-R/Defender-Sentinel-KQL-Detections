@@ -2,15 +2,21 @@
 
 All notable changes to **Defender-Sentinel-KQL-Detections** are documented in this file.
 
+## [1.1.0] - 2026-11-21
+
+### Fixed & Changed
+- **MDVM-004 (`detections/MDVM-004-high-exposure-exploited-critical-vulnerabilities.yaml`):** Renamed from `MDVM-004-unpatched-cisa-kev-high-exposure-endpoints.yaml` and joined `DeviceTvmSoftwareVulnerabilitiesKB` (`IsExploitAvailable == 1`) plus a `KnownExploitedCves` lookup list so the query filters on verified public exploitability and KEV status rather than generic CVSS severity alone.
+- **MDI-003 (`detections/MDI-003-privileged-role-assignment-outside-pim.yaml`):** Expanded `OperationName` matching to cover permanent assignments executed inside PIM (`Add member to role outside of PIM (permanent)`, `Add member to role in PIM completed (permanent)`) in addition to direct `"Add member to role"` events, and updated `Account` entity mappings to use `FullName` for UPNs.
+- **MDO-002 (`detections/MDO-002-aitm-session-hijack-and-hidden-inbox-rule.yaml`):** Scoped `platform` accurately to `Microsoft Defender XDR` (`CloudAppEvents` / `AADSignInEventsBeta`) and added IP mismatch (`RuleClientIP != SignInIP`), non-interactive logon, and sign-in risk correlation to detect session cookie replay.
+- **MDE-001 & SENTINEL-005 Evasion Hardening:** Added `DeviceEvents` (`TamperingAttempt`, `AntivirusTampering`, and `OpenProcessApiCall` against `lsass.exe`), shortened PowerShell parameter prefix matching (`DisableRealtimeMon`), `comsvcs.dll` ordinal `#24` regex matching, and PID-based `procdump -ma` detection.
+- Replaced `status: Production` labels with `Hunting / Lab-Validated` and `Hunting / Posture Query` to reflect rule validation scope accurately.
+
 ## [1.0.1] - 2026-11-21
 
 ### Added
-- **Sentinel Entity Type Validation (src/validate_detections.py):** Added strict validation against official Microsoft Sentinel entityType identifiers (Account, Host, IP, Process, AzureResource, File, FileHash, Mailbox, CloudApplication) and corresponding unit test coverage in 	ests/test_detections.py.
-- Added explicit author and license headers across validator and test modules.
+- **Sentinel Entity Type Validation (`src/validate_detections.py`):** Added strict validation against official Microsoft Sentinel `entityType` identifiers and corresponding unit test coverage in `tests/test_detections.py`.
 
 ## [1.0.0] - 2026-11-21
 
 ### Added
-- Initial release of 6 KQL detection and hunting rules (MDE-001, MDO-002, MDI-003, MDVM-004, SENTINEL-005, SENTINEL-006) spanning Microsoft Defender XDR (DeviceProcessEvents, CloudAppEvents, AADSignInEventsBeta, DeviceTvmSoftwareVulnerabilities) and Microsoft Sentinel (AuditLogs, AzureDiagnostics).
-- Static schema and MITRE ATT&CK validator (src/validate_detections.py) checking tactic/technique formatting, ISO-8601 lookback windows (queryFrequency <= queryPeriod), table references, and entityMappings column integrity.
-- Unit test suite (	ests/test_detections.py) and GitHub Actions CI workflow (.github/workflows/ci.yml).
+- Initial release of 6 KQL detection and hunting rules (`MDE-001`, `MDO-002`, `MDI-003`, `MDVM-004`, `SENTINEL-005`, `SENTINEL-006`) and static schema validator.
