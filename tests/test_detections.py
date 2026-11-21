@@ -4,7 +4,6 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-import pytest
 
 from src.validate_detections import (
     load_detection_yaml,
@@ -96,3 +95,12 @@ def test_validator_catches_unsupported_sentinel_entity_type() -> None:
     ]
     errors = validate_detection(sample, source_name="bad_entity_type.yaml")
     assert any("Unsupported Sentinel entityType" in e for e in errors)
+
+
+def test_validator_rejects_unknown_status() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    rule = load_detection_yaml(repo_root / "detections" / "MDE-001-tamper-protection-and-sensor-evasion.yaml")
+    bad_rule = copy.deepcopy(rule)
+    bad_rule["status"] = "Production"
+    errs = validate_detection(bad_rule, "bad_status.yaml")
+    assert any("Invalid status" in e for e in errs)

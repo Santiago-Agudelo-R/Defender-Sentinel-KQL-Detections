@@ -1,9 +1,9 @@
 id: MDE-001
-title: Microsoft Defender Sensor Tampering and Realtime Monitoring Disablement
+title: Microsoft Defender Antivirus or EDR Sensor Tampering
 basis: Field experience
 platform: Microsoft Defender XDR
 severity: High
-status: Hunting / Lab-Validated
+status: Experimental
 queryFrequency: PT1H
 queryPeriod: PT1H
 triggerOperator: gt
@@ -23,61 +23,62 @@ entityMappings:
   - entityType: Account
     fieldMappings:
       - identifier: Name
-        columnName: InitiatingProcessAccountName
+        columnName: AccountName
   - entityType: Process
     fieldMappings:
       - identifier: CommandLine
         columnName: ProcessCommandLine
-description: Detects attempts to tamper with Microsoft Defender Antivirus or EDR sensor services (WinDefend, Sense) across both DeviceProcessEvents (covering abbreviated Set-MpPreference parameter prefixes and encoded PowerShell invocations) and DeviceEvents (TamperingAttempt telemetry).
+description: >-
+  Flags attempts to switch off Defender Antivirus protections (Set-MpPreference parameters and
+  their short aliases such as -drtm), add Defender exclusions, stop or reconfigure the WinDefend or
+  Sense services, or remove definitions. PowerShell -EncodedCommand payloads are decoded so
+  encoded tampering is matched too. Also returns TamperingAttempt events that Defender raises when
+  Tamper Protection blocks a change. Expected noise: software deployment tools that add exclusions;
+  tune with an allowlist of approved initiating processes.
 query: |
   let ProcessTampering = DeviceProcessEvents
       | where Timestamp > ago(1h)
       | where FileName in~ ("powershell.exe", "pwsh.exe", "cmd.exe", "sc.exe", "net.exe", "net1.exe", "reg.exe", "MpCmdRun.exe")
-      | where ProcessCommandLine has_any (
-          "DisableRealtimeMon",
-          "DisableBehaviorMon",
-          "DisableIOAV",
-          "DisableScriptScan",
-          "DisableIntrusionPrevention",
-          "ExclusionPath",
-          "ExclusionProcess",
-          "ExclusionExtension",
-          "stop WinDefend",
-          "stop Sense",
-          "config WinDefend",
-          "DisableAntiSpyware",
-          "-RemoveDefinitions"
-      )
-      or (FileName in~ ("powershell.exe", "pwsh.exe") and ProcessCommandLine matches regex @"(?i)\s-(e|en|enc|enco|encodedcommand)\s+[A-Za-z0-9+/=]{20,}")
-      | where not(InitiatingProcessAccountName in~ ("system", "local service") and InitiatingProcessFileName =~ "MsMpEng.exe")
+      // -EncodedCommand payloads are UTF-16LE Base64: decode and strip the NUL bytes.
+      | extend EncodedPayload = extract(@'(?i)\s-e[a-z]*\s+([A-Za-z0-9+/=]{16,})', 1, ProcessCommandLine)
+      | extend DecodedCommand = iff(isnotempty(EncodedPayload), replace_regex(base64_decode_tostring(EncodedPayload), @'\x00', ''), '')
+      | extend Text = strcat(ProcessCommandLine, ' ', DecodedCommand)
+      // 'has' matches whole terms, so prefixes and aliases are matched with regex instead.
+      | where Text matches regex @'(?i)-(Disable(RealtimeMon|BehaviorMon|IOAV|ScriptScan|IntrusionPrev|ArchiveScan|BlockAtFirstSeen)[a-z]*|drtm|dbm|dioavp|dscrptsc)\b'
+          or Text matches regex @'(?i)\b(stop|delete|config)\s+(WinDefend|Sense|WdFilter|WdNisSvc)\b'
+          or (Text has_any ('Add-MpPreference', 'Set-MpPreference') and Text matches regex @'(?i)-Exclusion(Path|Process|Extension|IpAddress)\b')
+          or Text matches regex @'(?i)Windows Defender\\(Exclusions|Real-Time Protection)'
+          or Text matches regex @'(?i)DisableAntiSpyware|-RemoveDefinitions'
       | project
           Timestamp,
           DeviceId,
           DeviceName,
-          ActionSource = "DeviceProcessEvents",
+          Source = 'DeviceProcessEvents',
           ActionType,
-          InitiatingProcessAccountDomain,
-          InitiatingProcessAccountName,
+          AccountDomain = InitiatingProcessAccountDomain,
+          AccountName = InitiatingProcessAccountName,
           InitiatingProcessFileName,
           FileName,
           ProcessCommandLine,
-          SHA256,
+          DecodedCommand,
+          SHA1,
           ReportId;
-  let EventTampering = DeviceEvents
+  let BlockedTampering = DeviceEvents
       | where Timestamp > ago(1h)
-      | where ActionType in ("TamperingAttempt", "AntivirusTampering")
+      | where ActionType == 'TamperingAttempt'
       | project
           Timestamp,
           DeviceId,
           DeviceName,
-          ActionSource = "DeviceEvents",
+          Source = 'DeviceEvents',
           ActionType,
-          InitiatingProcessAccountDomain,
-          InitiatingProcessAccountName,
+          AccountDomain = InitiatingProcessAccountDomain,
+          AccountName = InitiatingProcessAccountName,
           InitiatingProcessFileName,
-          FileName = InitiatingProcessFileName,
+          FileName,
           ProcessCommandLine = InitiatingProcessCommandLine,
-          SHA256 = InitiatingProcessSHA256,
+          DecodedCommand = '',
+          SHA1 = InitiatingProcessSHA1,
           ReportId;
-  union ProcessTampering, EventTampering
+  union ProcessTampering, BlockedTampering
   | order by Timestamp desc

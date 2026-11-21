@@ -5,6 +5,7 @@ and Microsoft Sentinel analytic rules.
 
 Validates:
 - Required rule metadata fields (id, title, basis, platform, severity, status, etc.)
+- Allowed status values (Experimental, Hunting, Tested)
 - MITRE ATT&CK tactic names and technique ID format (Txxxx or Txxxx.xxx)
 - ISO-8601 duration strings for queryFrequency and queryPeriod
 - Table reference consistency between relevantTables and the KQL query body
@@ -22,10 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    import yaml  # type: ignore
-except ImportError:  # pragma: no cover
-    yaml = None
+import yaml
 
 REQUIRED_FIELDS = {
     "id",
@@ -48,6 +46,10 @@ REQUIRED_FIELDS = {
 
 VALID_SEVERITIES = {"Informational", "Low", "Medium", "High"}
 VALID_BASIS = {"Field experience", "SC-200 lab"}
+# Experimental: syntax and schema validated, not yet run against tenant data.
+# Hunting: posture or hunting query meant to be run on demand, not as an alert.
+# Tested: run against tenant data and tuned for false positives.
+VALID_STATUSES = {"Experimental", "Hunting", "Tested"}
 VALID_OPERATORS = {"gt", "lt", "eq", "ne"}
 VALID_ENTITY_TYPES = {"Account", "Host", "IP", "Process", "AzureResource", "File", "FileHash", "Mailbox", "CloudApplication"}
 VALID_MITRE_TACTICS = {
@@ -72,85 +74,12 @@ ISO_DURATION_RE = re.compile(r"^P(?:\d+D|T(?:\d+H|\d+M))$")
 KQL_OPERATOR_RE = re.compile(r"\|\s*(where|project|summarize|extend|join|order\s+by)\b")
 
 
-def _fallback_parse_yaml(text: str) -> Dict[str, Any]:
-    """
-    Lightweight parser for structured Sentinel detection YAML files when PyYAML
-    is not installed in minimal environments.
-    """
-    data: Dict[str, Any] = {}
-    lines = text.splitlines()
-    i = 0
-    n = len(lines)
-
-    while i < n:
-        line = lines[i]
-        if not line.strip() or line.strip().startswith("#"):
-            i += 1
-            continue
-
-        if ":" in line and not line.startswith(" "):
-            key, val = line.split(":", 1)
-            key = key.strip()
-            val = val.strip()
-
-            if val == "|":
-                i += 1
-                block_lines: List[str] = []
-                while i < n and (lines[i].startswith("  ") or not lines[i].strip()):
-                    block_lines.append(lines[i][2:] if lines[i].startswith("  ") else "")
-                    i += 1
-                data[key] = "\n".join(block_lines).strip()
-                continue
-            elif val == "":
-                i += 1
-                if key == "entityMappings":
-                    mappings: List[Dict[str, Any]] = []
-                    current_entity: Optional[Dict[str, Any]] = None
-                    while i < n and lines[i].startswith("  "):
-                        s = lines[i].strip()
-                        if s.startswith("- entityType:"):
-                            current_entity = {
-                                "entityType": s.split(":", 1)[1].strip(),
-                                "fieldMappings": [],
-                            }
-                            mappings.append(current_entity)
-                        elif s.startswith("- identifier:") and current_entity is not None:
-                            ident = s.split(":", 1)[1].strip()
-                            col = ""
-                            if i + 1 < n and "columnName:" in lines[i + 1]:
-                                col = lines[i + 1].split(":", 1)[1].strip()
-                                i += 1
-                            current_entity["fieldMappings"].append(
-                                {"identifier": ident, "columnName": col}
-                            )
-                        i += 1
-                    data[key] = mappings
-                else:
-                    items: List[str] = []
-                    while i < n and lines[i].startswith("  "):
-                        s = lines[i].strip()
-                        if s.startswith("- "):
-                            items.append(s[2:].strip())
-                        i += 1
-                    data[key] = items
-                continue
-            else:
-                if val.isdigit():
-                    data[key] = int(val)
-                else:
-                    data[key] = val
-        i += 1
-    return data
-
-
 def load_detection_yaml(path: Path) -> Dict[str, Any]:
     """Load a detection YAML file into a dictionary."""
-    raw = path.read_text(encoding="utf-8")
-    if yaml is not None:
-        parsed = yaml.safe_load(raw)
-        if isinstance(parsed, dict):
-            return parsed
-    return _fallback_parse_yaml(raw)
+    parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{path.name}: expected a YAML mapping at the top level")
+    return parsed
 
 
 def parse_duration_minutes(duration_str: str) -> Optional[int]:
@@ -180,6 +109,11 @@ def validate_detection(rule: Dict[str, Any], source_name: str = "<memory>") -> L
     if rule["severity"] not in VALID_SEVERITIES:
         errors.append(
             f"{source_name}: Invalid severity '{rule['severity']}'. Expected one of {sorted(VALID_SEVERITIES)}"
+        )
+
+    if rule["status"] not in VALID_STATUSES:
+        errors.append(
+            f"{source_name}: Invalid status '{rule['status']}'. Expected one of {sorted(VALID_STATUSES)}"
         )
 
     if rule["basis"] not in VALID_BASIS:

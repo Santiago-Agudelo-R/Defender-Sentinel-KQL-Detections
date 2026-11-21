@@ -1,9 +1,9 @@
 id: MDI-003
-title: Permanent High-Privilege Entra ID Role Assignment (Direct or Permanent PIM)
+title: Permanent Tier-0 Entra ID Role Assignment (Direct or Permanent PIM)
 basis: Field experience
 platform: Microsoft Sentinel
 severity: High
-status: Hunting / Lab-Validated
+status: Experimental
 queryFrequency: PT1H
 queryPeriod: PT1H
 triggerOperator: gt
@@ -23,51 +23,58 @@ entityMappings:
   - entityType: Account
     fieldMappings:
       - identifier: FullName
-        columnName: TargetUpn
+        columnName: TargetPrincipal
   - entityType: IP
     fieldMappings:
       - identifier: Address
         columnName: InitiatedByIP
-description: Identifies active permanent directory role assignments for Tier-0 Entra ID roles across both direct assignments (Add member to role) and permanent PIM assignments (Add member to role outside of PIM (permanent), Add member to role in PIM completed (permanent)), while excluding time-bound PIM activations.
+description: >-
+  Flags permanent assignments of Tier-0 Entra ID roles, whether made directly (Add member to role)
+  or through PIM as a permanent assignment. Activations of eligible PIM assignments are excluded
+  because they are time-bound. The role and target principal are read from TargetResources by
+  resource type rather than by array position, and events are grouped by CorrelationId so each
+  assignment appears once.
 query: |
   let Tier0Roles = dynamic([
-      "Global Administrator",
-      "Company Administrator",
-      "Privileged Role Administrator",
-      "Security Administrator",
-      "Intune Administrator",
-      "Exchange Administrator",
-      "Conditional Access Administrator"
+      'Global Administrator',
+      'Company Administrator',
+      'Privileged Role Administrator',
+      'Privileged Authentication Administrator',
+      'Security Administrator',
+      'Intune Administrator',
+      'Exchange Administrator',
+      'Conditional Access Administrator'
   ]);
-  let PermanentRoleOps = dynamic([
-      "Add member to role",
-      "Add member to role outside of PIM (permanent)",
-      "Add member to role in PIM completed (permanent)"
+  let PermanentAssignmentOps = dynamic([
+      'Add member to role',
+      'Add member to role outside of PIM (permanent)',
+      'Add member to role in PIM completed (permanent)'
   ]);
   AuditLogs
   | where TimeGenerated > ago(1h)
-  | where OperationName in~ (PermanentRoleOps)
-  | where Result == "success"
-  | extend InitiatedByApp = tostring(InitiatedBy.app.displayName)
-  | where not(OperationName =~ "Add member to role" and InitiatedByApp == "MS-PIM")
-  | extend InitiatedByUpn = tostring(InitiatedBy.user.userPrincipalName)
-  | extend InitiatedByIP = tostring(InitiatedBy.user.ipAddress)
-  | extend TargetUpn = coalesce(
-      tostring(TargetResources[0].userPrincipalName),
-      tostring(TargetResources[2].userPrincipalName)
-  )
-  | mv-expand TargetRes = TargetResources
-  | mv-expand Prop = TargetRes.modifiedProperties
-  | where tostring(Prop.displayName) in~ ("Role.DisplayName", "RoleDefinitionOriginId", "DisplayName")
-  | extend AssignedRole = trim('"', tostring(Prop.newValue))
+  | where OperationName in~ (PermanentAssignmentOps)
+  | where Result =~ 'success'
+  | extend
+      InitiatedByApp = tostring(InitiatedBy.app.displayName),
+      InitiatedByUpn = tostring(InitiatedBy.user.userPrincipalName),
+      InitiatedByIP = tostring(InitiatedBy.user.ipAddress)
+  // PIM itself writes 'Add member to role' when a user activates an eligible (time-bound) assignment.
+  | where not(OperationName =~ 'Add member to role' and InitiatedByApp == 'MS-PIM')
+  | mv-expand TargetResource = TargetResources
+  | extend ResourceType = tostring(TargetResource.type), ModifiedProps = TargetResource.modifiedProperties
+  | mv-expand ModifiedProp = iff(array_length(ModifiedProps) > 0, ModifiedProps, dynamic([{}]))
+  | extend
+      RoleCandidate = case(
+          tostring(ModifiedProp.displayName) == 'Role.DisplayName', trim('"', tostring(ModifiedProp.newValue)),
+          ResourceType =~ 'Role', tostring(TargetResource.displayName),
+          ''),
+      TargetCandidate = iff(ResourceType in~ ('User', 'ServicePrincipal', 'Group'),
+          coalesce(tostring(TargetResource.userPrincipalName), tostring(TargetResource.displayName)), '')
+  | summarize
+      arg_max(TimeGenerated, OperationName, InitiatedByUpn, InitiatedByApp, InitiatedByIP),
+      AssignedRole = take_anyif(RoleCandidate, isnotempty(RoleCandidate)),
+      TargetPrincipal = take_anyif(TargetCandidate, isnotempty(TargetCandidate))
+      by CorrelationId
   | where AssignedRole in~ (Tier0Roles)
-  | project
-      TimeGenerated,
-      OperationName,
-      AssignedRole,
-      TargetUpn,
-      InitiatedByUpn,
-      InitiatedByApp,
-      InitiatedByIP,
-      CorrelationId
+  | project TimeGenerated, OperationName, AssignedRole, TargetPrincipal, InitiatedByUpn, InitiatedByApp, InitiatedByIP, CorrelationId
   | order by TimeGenerated desc

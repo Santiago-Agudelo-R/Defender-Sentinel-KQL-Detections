@@ -2,6 +2,25 @@
 
 All notable changes to **Defender-Sentinel-KQL-Detections** are documented in this file.
 
+## [1.2.0] - 2026-11-21
+
+### Added
+- **KQL syntax and schema check in CI (`tools/kql-lint`):** Every query is parsed with Microsoft's Kusto.Language engine (`@kusto/language-service-next`) against table schemas copied from Microsoft Learn. It immediately found a non-existent column (`ExploitTypes`) and the retired `AADSignInEventsBeta` table.
+- **GitHub Actions workflow** running the metadata validator, the unit tests and the KQL check.
+- **Validator:** `status` must be `Experimental`, `Hunting` or `Tested`.
+
+### Fixed
+- **MDE-001:** `has "DisableRealtimeMon"` never matched `DisableRealtimeMonitoring`, because `has` matches whole terms; parameters and aliases such as `-drtm` are now matched with regex. Generic `-EncodedCommand` use is no longer flagged by itself; payloads are decoded and checked for tampering. Removed the non-existent `AntivirusTampering` action type.
+- **MDO-002:** Migrated to `EntraIdSignInEvents` and `RiskLevelAggregated` (`RiskLevelDuringSignIn` does not exist in the retired table). The rule now flags an inbox rule whose IP is absent from the user's successful sign-ins, instead of any mismatch with any single sign-in, which fired for most mobile and VPN users.
+- **MDI-003:** The role and target principal are read from `TargetResources` by resource type instead of by array position, and results are grouped by `CorrelationId`.
+- **MDVM-004:** Removed the hard-coded four-CVE "KEV" list and the KEV claim; fixed `IsExploitAvailable` (boolean) and `CvssScore` (string) handling; renamed the file accordingly.
+- **SENTINEL-005:** ProcDump option regex now covers `-ma`, `-mm` and `-mp` in one pattern, the ordinal regex accepts `#+24`/`#024`, and `SHA1` replaces the usually empty `SHA256`.
+- **SENTINEL-006:** Excluded `VaultGet`, which returns vault metadata, not secrets; the threshold now counts distinct secrets per caller; identity claims are read with `column_ifexists`; ATT&CK mapping corrected to T1555.006.
+
+### Changed
+- All alert rules are labeled `Experimental` until they have been run against tenant data. The previous `Lab-Validated` labels were not backed by recorded results.
+- The validator requires PyYAML; the hand-written YAML fallback parser was removed. Dependencies are pinned.
+
 ## [1.1.0] - 2026-11-21
 
 ### Fixed & Changed

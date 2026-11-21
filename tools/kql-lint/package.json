@@ -1,0 +1,12 @@
+{
+  "name": "kql-lint",
+  "private": true,
+  "description": "Semantic validation of detection queries with Microsoft's Kusto.Language parser",
+  "scripts": {
+    "lint": "node lint.js ../../detections"
+  },
+  "dependencies": {
+    "@kusto/language-service-next": "12.4.1",
+    "js-yaml": "4.1.0"
+  }
+}

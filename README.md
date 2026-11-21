@@ -1,67 +1,69 @@
 # Defender-Sentinel-KQL-Detections
 
-KQL hunting queries and Microsoft Sentinel analytic rule definitions for **Microsoft Defender XDR** (`MDE`, `MDO`, `MDVM`) and **Microsoft Sentinel** (SC-200 lab track), with a Python static validator for schema, MITRE ATT&CK, and entity-mapping consistency.
+Detection-as-code for **Microsoft Defender XDR** and **Microsoft Sentinel**: six KQL rules stored as YAML, each checked in CI by a metadata validator and by Microsoft's own Kusto parser against the documented table schemas.
 
-[![KQL](https://img.shields.io/badge/Language-KQL-0078D4.svg)](https://learn.microsoft.com/en-us/kusto/query/)
-[![Python 3.10+](https://img.shields.io/badge/Validator-Python_3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![CI](https://github.com/Santiago-Agudelo-R/Defender-Sentinel-KQL-Detections/actions/workflows/ci.yml/badge.svg)](https://github.com/Santiago-Agudelo-R/Defender-Sentinel-KQL-Detections/actions/workflows/ci.yml)
+[![KQL](https://img.shields.io/badge/Language-KQL-0078D4.svg)](https://learn.microsoft.com/kusto/query/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/Santiago-Agudelo-R/Defender-Sentinel-KQL-Detections?color=success)](https://github.com/Santiago-Agudelo-R/Defender-Sentinel-KQL-Detections/releases)
 
 ---
 
-## Overview
+## Detection catalog
 
-`Defender-Sentinel-KQL-Detections` stores Microsoft Defender XDR advanced hunting queries and Microsoft Sentinel scheduled analytic rule templates as structured YAML files. Each file is checked by `src/validate_detections.py` (using `PyYAML`) to verify:
+| Rule | What it finds | Platform | Tables | ATT&CK | Basis | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| [MDE-001](detections/MDE-001-tamper-protection-and-sensor-evasion.yaml) | Attempts to switch off Defender protections, add exclusions or stop `WinDefend`/`Sense`, including short aliases (`-drtm`) and decoded `-EncodedCommand` payloads | Defender XDR | `DeviceProcessEvents`, `DeviceEvents` | T1562.001 | Field experience | Experimental |
+| [MDO-002](detections/MDO-002-aitm-session-hijack-and-hidden-inbox-rule.yaml) | Inbox rules or forwarding created from an IP that never appears in the user's own sign-ins (AiTM session-cookie replay) | Defender XDR | `CloudAppEvents`, `EntraIdSignInEvents` | T1564.008, T1114.003 | SC-200 lab | Experimental |
+| [MDI-003](detections/MDI-003-privileged-role-assignment-outside-pim.yaml) | Permanent Tier-0 Entra ID role assignments, direct or through PIM, excluding time-bound activations | Sentinel | `AuditLogs` | T1098.003 | Field experience | Experimental |
+| [MDVM-004](detections/MDVM-004-high-exposure-exploitable-critical-vulnerabilities.yaml) | High-exposure devices ranked by Critical CVEs with public exploits, internet-facing first | Defender XDR | `DeviceTvmSoftwareVulnerabilities`, `...KB`, `DeviceInfo` | T1190, T1068 | Field experience | Hunting |
+| [SENTINEL-005](detections/SENTINEL-005-credential-dumping-lsass-access.yaml) | LSASS dumping via `comsvcs.dll` (name or ordinal 24), ProcDump by name or PID, `createdump`, and direct LSASS handle opens | Sentinel | `DeviceProcessEvents`, `DeviceEvents` | T1003.001 | SC-200 lab | Experimental |
+| [SENTINEL-006](detections/SENTINEL-006-azure-keyvault-mass-secret-retrieval.yaml) | One caller reading many **distinct** Key Vault secrets in an hour | Sentinel | `AzureDiagnostics` | T1555.006 | SC-200 lab | Experimental |
 
-1. **MITRE ATT&CK Alignment:** Valid tactic names (`DefenseEvasion`, `Persistence`, `PrivilegeEscalation`, `CredentialAccess`, `Collection`, `InitialAccess`) and technique IDs (`Txxxx` or `Txxxx.xxx`).
-2. **Lookback & Scheduling Windows:** Valid ISO-8601 `queryFrequency` and `queryPeriod` values (`queryFrequency <= queryPeriod`).
-3. **Table & Entity-Mapping Integrity:** Every table listed in `relevantTables` and every column mapped in `entityMappings` (`Host`, `Account`, `IP`, `Process`, `AzureResource`) must appear in the KQL query body and use valid Microsoft Sentinel entity types.
+**Status** is enforced by the validator:
 
----
+- **Experimental:** syntax and schema validated in CI; not yet run against tenant data, so false-positive volume is unknown.
+- **Hunting:** posture or hunting query to run on demand, not an alert.
+- **Tested:** run against tenant data and tuned for false positives. No rule has this status yet.
 
-## Detection & Hunting Catalog
-
-| Rule ID | Title | Platform | Tables | MITRE ATT&CK | Basis & Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| [**MDE-001**](detections/MDE-001-tamper-protection-and-sensor-evasion.yaml) | Microsoft Defender Sensor Tampering and Realtime Monitoring Disablement | Defender XDR | `DeviceProcessEvents`, `DeviceEvents` | `T1562.001` | Field experience (`Hunting / Lab-Validated`) |
-| [**MDO-002**](detections/MDO-002-aitm-session-hijack-and-hidden-inbox-rule.yaml) | Post-Sign-In Suspicious Exchange Online Inbox Rule or Forwarding Modification | Defender XDR | `CloudAppEvents`, `AADSignInEventsBeta` | `T1564.008`, `T1114.003` | SC-200 lab (`Lab-Validated`) |
-| [**MDI-003**](detections/MDI-003-privileged-role-assignment-outside-pim.yaml) | Permanent High-Privilege Entra ID Role Assignment (Direct or Permanent PIM) | Microsoft Sentinel | `AuditLogs` | `T1098.003` | Field experience (`Hunting / Lab-Validated`) |
-| [**MDVM-004**](detections/MDVM-004-high-exposure-exploited-critical-vulnerabilities.yaml) | High-Exposure Endpoints with Unpatched Exploited or KEV Critical Vulnerabilities | Defender XDR | `DeviceTvmSoftwareVulnerabilities`, `DeviceTvmSoftwareVulnerabilitiesKB`, `DeviceInfo` | `T1190`, `T1068` | Field experience (`Hunting / Posture Query`) |
-| [**SENTINEL-005**](detections/SENTINEL-005-credential-dumping-lsass-access.yaml) | Credential Dumping via `comsvcs.dll` (`MiniDump` / Ordinal 24), ProcDump, or Direct LSASS Access | Microsoft Sentinel | `DeviceProcessEvents`, `DeviceEvents` | `T1003.001` | SC-200 lab (`Lab-Validated`) |
-| [**SENTINEL-006**](detections/SENTINEL-006-azure-keyvault-mass-secret-retrieval.yaml) | Anomalous Mass Secret Retrieval from Azure Key Vault | Microsoft Sentinel | `AzureDiagnostics` | `T1552.004`, `T1530` | SC-200 lab (`Lab-Validated`) |
-
-**Basis:** *Field experience* queries reflect hunting patterns from day-to-day Defender XDR and Entra ID operations. *SC-200 lab* queries come from self-directed Microsoft Sentinel detection engineering labs. None of these rules should be enabled as automated blocking rules without first baselining false-positive volume in your tenant.
+**Basis:** *Field experience* rules come from day-to-day Defender XDR and Entra ID work; *SC-200 lab* rules come from self-directed Sentinel labs. Each rule's `description` lists its expected noise.
 
 ---
 
-## Usage & Validation
+## Design notes
 
-Validate all detection rules locally using the Python validator:
+A few decisions that shape the queries:
 
-```powershell
-PS> python src/validate_detections.py --path detections
-[OK] Validated 6 KQL detection rules in 'detections' with 0 errors.
+- **`has` matches whole terms.** Parameter prefixes and aliases (`-DisableRealtimeMon…`, `-drtm`) are matched with regex, because `has "DisableRealtimeMon"` would not match `DisableRealtimeMonitoring`.
+- **AiTM detection compares IPs against the user's sign-in history**, not against a single sign-in. Comparing against any one sign-in fires on every mobile or VPN user.
+- **`AADSignInEventsBeta` was retired on 2026-10-19.** MDO-002 uses its replacement, `EntraIdSignInEvents`, and the aggregated risk column `RiskLevelAggregated`.
+- **`SHA256` is usually empty in device tables**, per Microsoft's schema reference, so rules project `SHA1`.
+- **MDVM-004 is not a KEV rule.** Defender exposes `IsExploitAvailable`, not the CISA KEV catalog. To scope to KEV, join the published KEV CSV with `externaldata`.
+- **TVM tables are not ingested into Sentinel**, so MDVM-004 runs in Defender XDR advanced hunting.
+
+---
+
+## Validation pipeline
+
+Every push runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+1. **Metadata validator** ([`src/validate_detections.py`](src/validate_detections.py)): required fields, allowed status and basis values, MITRE tactic and technique format, ISO-8601 schedule with `queryFrequency <= queryPeriod`, valid Sentinel entity types, and every declared table and mapped column present in the query.
+2. **Unit tests** ([`tests/`](tests)): the validator rejects each class of broken rule.
+3. **KQL syntax and schema check** ([`tools/kql-lint`](tools/kql-lint)): parses each query with [`@kusto/language-service-next`](https://www.npmjs.com/package/@kusto/language-service-next), the Kusto.Language engine behind Microsoft's query editors, against the column names and types in [`schema.kql-schema`](tools/kql-lint/schema.kql-schema), which are copied from Microsoft Learn. It fails on unknown tables or columns, retired tables and malformed operators.
+
+Run it locally:
+
+```bash
+pip install -r requirements-dev.txt
+python src/validate_detections.py --path detections
+pytest -v
+
+cd tools/kql-lint && npm ci && npm run lint
 ```
 
-Run the `pytest` unit test suite:
-
-```powershell
-PS> python -m pytest -v
-============================= test session starts =============================
-collected 6 items
-
-tests/test_detections.py::test_all_repository_detections_pass_validation PASSED [ 16%]
-tests/test_detections.py::test_duration_parser_accepts_valid_iso8601_and_rejects_invalid PASSED [ 33%]
-tests/test_detections.py::test_validator_catches_invalid_mitre_technique_and_tactic PASSED [ 50%]
-tests/test_detections.py::test_validator_catches_unreferenced_table_and_missing_entity_column PASSED [ 66%]
-tests/test_detections.py::test_validator_catches_query_frequency_greater_than_period PASSED [ 83%]
-tests/test_detections.py::test_validator_catches_unsupported_sentinel_entity_type PASSED [100%]
-
-============================== 6 passed in 0.12s ==============================
-```
+Limits: the parser proves a query is well-formed against the documented schema, not that it returns the right rows. That needs tenant data, which is what the **Tested** status is for.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).

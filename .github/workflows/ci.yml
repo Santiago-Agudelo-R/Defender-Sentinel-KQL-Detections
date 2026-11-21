@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate detections
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Metadata validator and unit tests
+        run: |
+          pip install -r requirements-dev.txt
+          python src/validate_detections.py --path detections
+          pytest -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: KQL syntax and schema check (Microsoft Kusto.Language parser)
+        working-directory: tools/kql-lint
+        run: |
+          npm ci
+          npm run lint
