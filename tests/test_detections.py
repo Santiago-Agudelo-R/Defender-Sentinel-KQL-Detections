@@ -82,9 +82,10 @@ def test_validator_catches_query_frequency_greater_than_period() -> None:
     assert any("cannot exceed queryPeriod" in e for e in errs)
 
 def test_validator_catches_unsupported_sentinel_entity_type() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
     rules = [
         load_detection_yaml(p)
-        for p in sorted((REPO_ROOT / "detections").glob("*.yaml"))
+        for p in sorted((repo_root / "detections").glob("*.yaml"))
     ]
     sample = dict(rules[0])
     sample["entityMappings"] = [
